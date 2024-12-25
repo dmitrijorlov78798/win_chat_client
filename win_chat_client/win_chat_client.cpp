@@ -312,7 +312,7 @@ public :
         unsigned size = read(Socket, &buf[0], buf.size());
         if (size > 0)
         {
-            std::string tmp(buf, size);
+            std::string tmp(buf, 0, size);
             buf.swap(tmp);
             result = true;
         }
@@ -368,9 +368,9 @@ public :
     /// </summary>
     /// <param name="port"> -- номер порта для прослушивания </param>
 #ifdef __WIN32__
-    chat_manager_t(unsigned port) : logger("client.log", true), console(logger), multiplexor(logger), b_exit(false)
+    chat_manager_t(unsigned port) : logger("client.log", true), console(logger), multiplexor(logger), b_exit(false), b_shut(false), b_echo(false)
 #else
-    chat_manager_t(unsigned port) : logger("client.log", true), multiplexor(logger), exit(false)
+    chat_manager_t(unsigned port) : logger("client.log", true), multiplexor(logger), exit(false), b_shut(false), b_echo(false)
 #endif
     {
         socket = std::make_shared<network::TCP_socketClient_t>(IP_ADRES, port, logger);
@@ -405,7 +405,16 @@ public :
                     else
                     {
                         if (it->Type() == TypeMsg::Exit) // мониторим команду на выход
+                        {
                             b_exit = true;
+                            if (b_shut) // если сервер уже отключен
+                            {
+                                it = l_msg_TX.erase(it); // команду ему не отправляем
+                                break;
+                            }
+                        }
+                        if (it->Type() == TypeMsg::shutDown) // мониторим команду на отключение сервера
+                            b_shut = true;
 
                         int code = socket->Send(it->Str(), it->GetOffset()); // отправляем сообщение
                         if (0 == code) // если сообщение отправлено полностью
@@ -420,8 +429,13 @@ public :
                         }
                         else if (-3 == code) // сокет не готов к отправке
                             break; // до следующей итерации
-                        else // системная ошибка
+                        else if (-1 == code)// системная ошибка
                             it = l_msg_TX.erase(it); // удаляем сообщения
+                        else if (-2 == code) // сокет закрыт
+                        {
+                            it = l_msg_TX.erase(it);
+                            console.PrintMsg(msg_t(TypeMsg::normal, "server not connected")); // диагностируем
+                        }
                     }
             }
             // прием
@@ -438,32 +452,45 @@ public :
                 case TypeMsg::linkOff: // диагностика собеседника
                     info.ConnectedVisavi(false);
                     break;
-                case TypeMsg::shutDown: // если сервер закрывается, отправляем эхо ответ
+                case TypeMsg::shutDown: // если сервер закрывается, толкаем свои соединения
                     l_msg_TX.push_back(msg_t(TypeMsg::shutDown));
+                    b_echo = true;
                 default:
                     console.PrintMsg(msg_RX);
                     break;
                 }
 
                 msg_RX.Update().clear();
+
+#ifdef __WIN32__
+                if (b_shut)
+                    socket->ResetConnected();
+#endif
             }
+
+#ifdef __WIN32__
+            if (b_shut && b_echo)
+                socket->ResetConnected();
+#endif
 
             info.ConnectedServer(socket->GetConnected());
         }
     }
 protected :
-    log_t logger; 
-    std::shared_ptr<network::TCP_socketClient_t> socket;
+    log_t logger;  // объект логгирования
+    std::shared_ptr<network::TCP_socketClient_t> socket; // клиентский сокет
 #ifdef __WIN32__
-    console_t console;
+    console_t console; // консоль
 #else
-    std::shared_ptr<console_t> console;
+    std::shared_ptr<console_t> console; // консоль 
 #endif
-    network::NonBlockSocket_manager_t multiplexor;
-    msg_t msg_RX;
-    std::list<msg_t> l_msg_TX;
-    info_t info;
-    bool b_exit;
+    network::NonBlockSocket_manager_t multiplexor; // мультиплексор неблокирующих сокетов
+    msg_t msg_RX; // буфер приходящего сообщения
+    std::list<msg_t> l_msg_TX; // буферный список сообщений на отправку
+    info_t info; // информация о соединении
+    bool b_exit; // флаг выхода из программы
+    bool b_shut; // флаг отправки команды на отключения сервера
+    bool b_echo; // флаг эхоответа на отключение сервера
 };
 
 /// <summary>

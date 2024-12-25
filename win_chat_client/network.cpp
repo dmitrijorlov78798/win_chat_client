@@ -4,10 +4,7 @@
 std::unordered_set<unsigned> g_journal; // журнал для регистрации объектов с сетевым взаимодействием
 #endif
 
-/// <summary>
-/// конструктор по умолчанию
-/// </summary>
-network::RAII_OSsock::RAII_OSsock(log_t& logger) 
+void network::RAII_OSsock::registration()
 {
 #ifdef __WIN32__
     if (g_journal.empty()) // если интерфейс еще не открывали и количество пользователей = 0
@@ -18,6 +15,25 @@ network::RAII_OSsock::RAII_OSsock(log_t& logger)
     g_journal.insert(objectID); // регистрируемся 
 #endif
 }
+
+/// <summary>
+/// конструктор по умолчанию
+/// </summary>
+network::RAII_OSsock::RAII_OSsock(log_t& logger) : logger(logger)
+{
+    registration();
+}
+
+network::RAII_OSsock::RAII_OSsock(const RAII_OSsock& rvalue) : logger(rvalue.logger)
+{
+    registration();
+}
+
+network::RAII_OSsock::RAII_OSsock(RAII_OSsock&& rvalue) noexcept : logger(rvalue.logger)
+{
+    registration();
+}
+
 network::RAII_OSsock::~RAII_OSsock()
 {
 #ifdef __WIN32__
@@ -227,6 +243,11 @@ const sockaddr* network::sockInfo_t::getSockAddr() const
     return &Addr;
 }
 
+network::sockInfo_t network::sockInfo_t::GetSockInfo() const
+{
+    return *this;
+}
+
 /// <summary>
 /// Метод возврата размера структуры описывающей сокет
 /// </summary>
@@ -318,6 +339,12 @@ bool network::socket_t::Close()
         }
 
     return Socket == INVALID_SOCKET;
+}
+
+void network::socket_t::Shutdown()
+{
+    if (shutdown(Socket, SHUT) < 0 && GetError() != error_t::SOCKET_NON_CONNECTED)
+        logger.doLog("socket_t::Shutdown() fail, errno: ", GetError());
 }
 
 /// <summary>
@@ -477,7 +504,10 @@ bool network::TCP_socketClient_t::SetSocket(SOCKET socket, sockInfo_t sockInfo)
 }
 
 network::TCP_socketClient_t::~TCP_socketClient_t()
-{}
+{
+    if (b_connected)
+        socket_t::Shutdown();
+}
 
 /// <summary>
 /// метод переноса уникального ресурса (дескпритор) между сокетами
@@ -678,6 +708,11 @@ bool network::TCP_socketClient_t::Connected()
 bool network::TCP_socketClient_t::GetConnected() const
 {
     return b_connected;
+}
+
+void network::TCP_socketClient_t::ResetConnected()
+{
+    b_connected = false;
 }
 
 /// <summary>
