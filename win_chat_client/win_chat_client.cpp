@@ -9,10 +9,11 @@
 #ifdef __WIN32__
 #include <conio.h>
 #else 
-#include <io.h>
+#include <unistd.h>
 #endif
 
 #define IP_ADRES "127.0.0.1"
+
 
 /// <summary>
 /// тип сообщений
@@ -25,7 +26,6 @@ enum TypeMsg
     Exit, // отключение клиента
     shutDown, // отключение сервера
     linkOn, // собеседники на связи
-    linkOff, // собеседники потеряли связь
     printinfo // вывод информации по соединению
 };
 
@@ -35,12 +35,12 @@ enum TypeMsg
 /// </summary>
 class msg_t
 {
-public :
+public:
     /// <summary>
     /// контсруктор
     /// </summary>
     /// <param name="type"> -- тип сообщения</param>
-    /// <param name="text"> -- текс сообщения</param>
+    /// <param name="text"> -- текст сообщения</param>
     msg_t(TypeMsg type = TypeMsg::defaul, std::string text = "") : offset(0)
     {
         switch (type)
@@ -55,19 +55,16 @@ public :
             this->text = "[SHUT][EOM]";
             break;
         case linkOn:
-            this->text = "[LNK1][EOM]";
-            break;
-        case linkOff:
-            this->text = "[LNK0][EOM]";
+            this->text = "[LINK][EOM]";
             break;
         case printinfo:
-            this->text = "[INFO]"; // ЕОМ не нужен, для внутреннего пользованя клиента
+            this->text = "[INFO][EOM]"; 
             break;
         default:
             break;
         }
     }
-    
+
     /// <summary>
     /// метод получения не константной ссылки на внутренний std::string с сообщением
     /// </summary>
@@ -104,10 +101,8 @@ public :
                 result = TypeMsg::Exit;
             else if (header == "[SHUT]")
                 result = TypeMsg::shutDown;
-            else if (header == "[LNK1]")
+            else if (header == "[LINK]")
                 result = TypeMsg::linkOn;
-            else if (header == "[LNK0]")
-                result = TypeMsg::linkOff;
             else if (header == "[INFO]")
                 result = TypeMsg::printinfo;
         }
@@ -128,26 +123,35 @@ public :
     /// метод получения текста сообщения без заголовка и конца сообщения
     /// </summary>
     /// <param name="buf"> -- ссылка на буфер, куда будет положен полезный текст сообщения </param>
-    void Print(std::string& buf) const
+    ///  <returns> 1 -- текст получен </returns>
+    bool Print(std::string& buf) const
     {
         buf.clear();
         switch (Type())
-        {
-            case TypeMsg::shutDown :
-                buf = "server get command shutdown";
-                break;
-            case TypeMsg::Exit :
-                buf = "server get command exit from visavi client";
-                break;
-            case TypeMsg::defaul:
-                buf = "server recived defined message";
-                break;
-            case TypeMsg::normal:
-                buf.assign(text, 6, text.size() - 11); // выдаем текст без заголовка и конца сообщения
-                break;
-            default:
-                break;
+        { // расшифровка сервесных сообщений
+        case TypeMsg::shutDown:
+            buf = "server get command shutdown";
+            break;
+        case TypeMsg::Exit:
+            buf = "server get command exit from visavi client";
+            break;
+        case TypeMsg::printinfo:
+            buf = "other visavi not connected";
+            break;
+        case TypeMsg::linkOn:
+            buf = "server get connected from other visavi";
+            break;
+        case TypeMsg::defaul:
+            buf = "server recived defined message";
+            break;
+        case TypeMsg::normal:
+            buf.assign(text, 6, text.size() - 11); // выдаем текст без заголовка и конца сообщения
+            break;
+        default:
+            break;
         }
+        
+        return !text.empty();
     }
 
     /// <summary>
@@ -168,7 +172,8 @@ public :
     {
         return offset;
     }
-protected :
+
+protected:
     std::string text; // строка хранящее сообщение, согласно формату, опраделенному выше
     unsigned offset; // смещение от начала сообщения
 };
@@ -178,7 +183,7 @@ protected :
 /// </summary>
 class info_t
 {
-protected :
+protected:
     /// <summary>
     /// метод получения секунд с 1970 года
     /// </summary>
@@ -189,7 +194,7 @@ protected :
         auto sec = std::chrono::duration_cast<std::chrono::seconds>(now); // секунды
         return sec.count();
     }
-public :
+public:
     info_t() = default;
     /// <summary>
     /// метод мониторинга связи с собеседником
@@ -197,6 +202,7 @@ public :
     /// <param name="flag"> -- флаг связи</param>
     void ConnectedVisavi(bool flag)
     {
+        flag &= b_connectedServer; // маскируем признак по наличию связи с сервером
         if (b_connectedVisavi && !flag)
         { // если связь пропала
             byte = 0;
@@ -215,7 +221,7 @@ public :
     /// <param name="flag"> -- флаг связи </param>
     void ConnectedServer(bool flag)
     {   // если связь пропала с сервером
-        if (b_connectedServer && !flag) 
+        if (b_connectedServer && !flag)
             ConnectedVisavi(flag); // то пропала и с собеседником
 
         b_connectedServer = flag;
@@ -270,7 +276,7 @@ public :
         return result;
     }
 
-protected :
+protected:
     bool b_connectedVisavi; // флаг состояния связи с собеседником
     bool b_connectedServer; // флаг состояния связи с сервером
     unsigned byte; // количество байт в трафике с момента подключения
@@ -283,12 +289,13 @@ class console_t
 class console_t : public network::socket_t // если линукс, можем сделать консоль - неблокирующим файловым дескриптором (сокетом)
 #endif
 {
-public :
+public:
     console_t(log_t& logger) // для уменьшения макросов, оставим сигнатуру общую
     {
 #ifndef __WIN32__
         Socket = 0; // дескриптор stdin
 #endif
+        std::cout << "command :\ninfo -- print info client connection\nshutdown -- close server\nexit -- close this client\n";
     }
 
     /// <summary>
@@ -339,8 +346,8 @@ public :
     void PrintMsg(const msg_t msgBuf) const
     {
         std::string out;
-        msgBuf.Print(out);
-        std::cout << out << '\n';
+        if (msgBuf.Print(out))
+            std::cout << out << '\n';
     }
 
     /// <summary>
@@ -353,7 +360,7 @@ public :
             << " connected server " << info.ConnectedServer()
             << " time: " << info.Sec() << "sec byte: " << info.Byte() << '\n';
     }
-protected :
+protected:
     std::string buf; // буферная строка
 };
 
@@ -362,15 +369,15 @@ protected :
 /// </summary>
 class chat_manager_t
 {
-public :
+public:
     /// <summary>
     /// конструктор
     /// </summary>
     /// <param name="port"> -- номер порта для прослушивания </param>
 #ifdef __WIN32__
-    chat_manager_t(unsigned port) : logger("client.log", true), console(logger), multiplexor(logger), b_exit(false), b_shut(false), b_echo(false)
+    chat_manager_t(unsigned port) : logger("client.log", true), console(logger), multiplexor(logger), u_counter(0), b_exit(false), b_shut(false), b_echo(false)
 #else
-    chat_manager_t(unsigned port) : logger("client.log", true), multiplexor(logger), exit(false), b_shut(false), b_echo(false)
+    chat_manager_t(unsigned port) : logger("client.log", true), multiplexor(logger), u_counter(0), exit(false), b_shut(false), b_echo(false)
 #endif
     {
         socket = std::make_shared<network::TCP_socketClient_t>(IP_ADRES, port, logger);
@@ -380,6 +387,15 @@ public :
         multiplexor.AddReader(console);
 #endif
     }
+
+    ~chat_manager_t()
+    {
+        if (socket->GetConnected() && !b_exit) // отключаем свое соединение на сервере
+        {
+            msg_t tmp(TypeMsg::Exit);
+            socket->Send(tmp.Str());
+        }
+    }
     /// <summary>
     /// основной метод работы
     /// </summary>
@@ -387,7 +403,7 @@ public :
     {
         while (!b_exit)
         {
-            multiplexor.Work(100);
+            multiplexor.Work(50);
             // отправка
 #ifdef __WIN32__
             if (console.ParseInput(l_msg_TX) || !l_msg_TX.empty())
@@ -395,7 +411,7 @@ public :
             if (multiplexor.GetReadyReader(console) && console.ParseInput(l_msg_TX) || !l_msg_TX.empty())
 #endif
             {
-                std::cout << "OUT: " << l_msg_TX.front().Str() << '\n'; ////////////////////////////////наладка
+                //std::cout << "OUT: " << l_msg_TX.front().Str() << '\n'; ////////////////////////////////наладка
                 for (auto it = l_msg_TX.begin(); it != l_msg_TX.end(); ) // идем по списку сообщений
                     if (it->Type() == TypeMsg::printinfo)
                     {
@@ -407,10 +423,10 @@ public :
                         if (it->Type() == TypeMsg::Exit) // мониторим команду на выход
                         {
                             b_exit = true;
-                            if (b_shut) // если сервер уже отключен
+                            if (!socket->GetConnected())
                             {
-                                it = l_msg_TX.erase(it); // команду ему не отправляем
-                                break;
+                                it = l_msg_TX.erase(it);
+                                continue;
                             }
                         }
                         if (it->Type() == TypeMsg::shutDown) // мониторим команду на отключение сервера
@@ -420,7 +436,7 @@ public :
                         if (0 == code) // если сообщение отправлено полностью
                         {
                             info.AddCountByte(it->Str().size()); // считаем трафик
-                            it = l_msg_TX.erase(it);
+                            it = l_msg_TX.erase(it); // удаляем сообщение
                         }
                         else if (0 < code) // если отправили часть
                         {
@@ -441,42 +457,44 @@ public :
             // прием
             if (multiplexor.GetReadyReader(socket) && 0 == socket->Recive(msg_RX.Update(), msg_RX.EOM())) // если пришли данные и сообщение полное
             {
-                std::cout << "IN: " << msg_RX.Str() << '\n'; ////////////////////////////////наладка
+                //std::cout << "IN: " << msg_RX.Str() << '\n'; ////////////////////////////////наладка
                 info.AddCountByte(msg_RX.Str().size()); // считаем трафик
 
                 switch (msg_RX.Type())
                 {
-                case TypeMsg::linkOn: // диагностика собеседника
-                    info.ConnectedVisavi(true);
+                case TypeMsg::linkOn: // подключение собеседника
+                    ++u_counter;
                     break;
-                case TypeMsg::linkOff: // диагностика собеседника
-                    info.ConnectedVisavi(false);
+                case TypeMsg::Exit: // отключение собеседника
+                    u_counter = u_counter > 0 ? u_counter - 1 : 0;
+                    break;
+                case TypeMsg::printinfo: // отсутствует собеседник
+                    u_counter = 0;
                     break;
                 case TypeMsg::shutDown: // если сервер закрывается, толкаем свои соединения
                     l_msg_TX.push_back(msg_t(TypeMsg::shutDown));
                     b_echo = true;
+                    break;
                 default:
-                    console.PrintMsg(msg_RX);
                     break;
                 }
 
+                console.PrintMsg(msg_RX);
                 msg_RX.Update().clear();
 
-#ifdef __WIN32__
-                if (b_shut)
+                if (b_shut) // сервер отключился по нашей команде
                     socket->ResetConnected();
-#endif
+
             }
 
-#ifdef __WIN32__
-            if (b_shut && b_echo)
+            if (b_shut && b_echo || b_exit) // сервер отключился по команде другого клиента
                 socket->ResetConnected();
-#endif
 
             info.ConnectedServer(socket->GetConnected());
+            info.ConnectedVisavi(u_counter > 0);
         }
     }
-protected :
+protected:
     log_t logger;  // объект логгирования
     std::shared_ptr<network::TCP_socketClient_t> socket; // клиентский сокет
 #ifdef __WIN32__
@@ -488,6 +506,7 @@ protected :
     msg_t msg_RX; // буфер приходящего сообщения
     std::list<msg_t> l_msg_TX; // буферный список сообщений на отправку
     info_t info; // информация о соединении
+    unsigned u_counter; // счетчик собеседников
     bool b_exit; // флаг выхода из программы
     bool b_shut; // флаг отправки команды на отключения сервера
     bool b_echo; // флаг эхоответа на отключение сервера
