@@ -492,6 +492,7 @@ public:
 
             info.ConnectedServer(socket->GetConnected());
             info.ConnectedVisavi(u_counter > 0);
+            b_exit |= !socket->GetConnected() && b_shut;
         }
     }
 protected:
