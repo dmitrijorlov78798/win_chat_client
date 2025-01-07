@@ -195,7 +195,12 @@ protected:
         return sec.count();
     }
 public:
-    info_t() = default;
+    /// <summary>
+    /// конструктор
+    /// </summary>
+    info_t() : b_connectedVisavi(false), b_connectedServer(false), byte(0), sec(0)
+    {}
+
     /// <summary>
     /// метод мониторинга связи с собеседником
     /// </summary>
@@ -284,15 +289,29 @@ protected:
 };
 
 #ifdef __WIN32__
+/// <summary>
+/// класс реализующий взаимодействие с пользователем через консоль
+/// </summary>
 class console_t
-#else
-class console_t : public network::socket_t // если линукс, можем сделать консоль - неблокирующим файловым дескриптором (сокетом)
-#endif
 {
 public:
-    console_t(log_t& logger) // для уменьшения макросов, оставим сигнатуру общую
+    /// <summary>
+    /// конструктор
+    /// </summary>
+    console_t()
     {
-#ifndef __WIN32__
+#else
+/// <summary>
+/// класс реализующий взаимодействие с пользователем через консоль
+/// </summary>
+class console_t : public network::socket_t // если линукс, можем сделать консоль - неблокирующим файловым дескриптором (сокетом)
+{
+public:
+    /// <summary>
+    /// конструктор
+    /// </summary>
+    console_t(log_t& logger) : network::socket_t(logger)
+    {
         Socket = 0; // дескриптор stdin
 #endif
         std::cout << "command :\ninfo -- print info client connection\nshutdown -- close server\nexit -- close this client\n";
@@ -317,9 +336,9 @@ public:
 #else
         buf.resize(512, '\0');
         unsigned size = read(Socket, &buf[0], buf.size());
-        if (size > 0)
-        {
-            std::string tmp(buf, 0, size);
+        if (size > 0) 
+        {   // избавляемся от лишнего в буфере
+            std::string tmp(buf, 0, size - 1); 
             buf.swap(tmp);
             result = true;
         }
@@ -357,7 +376,7 @@ public:
     void PrintInfo(const info_t& info)
     {
         std::cout << "info: connected visavi: " << info.ConnectedVisavi()
-            << " connected server " << info.ConnectedServer()
+            << " connected server: " << info.ConnectedServer()
             << " time: " << info.Sec() << "sec byte: " << info.Byte() << '\n';
     }
 protected:
@@ -365,7 +384,7 @@ protected:
 };
 
 /// <summary>
-/// класс управления 
+/// класс управления чатом
 /// </summary>
 class chat_manager_t
 {
@@ -373,12 +392,8 @@ public:
     /// <summary>
     /// конструктор
     /// </summary>
-    /// <param name="port"> -- номер порта для прослушивания </param>
-#ifdef __WIN32__
-    chat_manager_t(unsigned port) : logger("client.log", true), console(logger), multiplexor(logger), u_counter(0), b_exit(false), b_shut(false), b_echo(false)
-#else
-    chat_manager_t(unsigned port) : logger("client.log", true), multiplexor(logger), u_counter(0), exit(false), b_shut(false), b_echo(false)
-#endif
+    /// <param name="port"> -- номер порта для подключения </param>
+    chat_manager_t(unsigned port) : logger(), multiplexor(logger), u_counter(0), b_exit(false), b_shut(false), b_echo(false)
     {
         socket = std::make_shared<network::TCP_socketClient_t>(IP_ADRES, port, logger);
         multiplexor.AddReader(socket);
@@ -388,6 +403,7 @@ public:
 #endif
     }
 
+    // деструктор
     ~chat_manager_t()
     {
         if (socket->GetConnected() && !b_exit) // отключаем свое соединение на сервере
@@ -408,14 +424,18 @@ public:
 #ifdef __WIN32__
             if (console.ParseInput(l_msg_TX) || !l_msg_TX.empty())
 #else
-            if (multiplexor.GetReadyReader(console) && console.ParseInput(l_msg_TX) || !l_msg_TX.empty())
+            if (multiplexor.GetReadyReader(console) && console->ParseInput(l_msg_TX) || !l_msg_TX.empty())
 #endif
             {
                 //std::cout << "OUT: " << l_msg_TX.front().Str() << '\n'; ////////////////////////////////наладка
                 for (auto it = l_msg_TX.begin(); it != l_msg_TX.end(); ) // идем по списку сообщений
                     if (it->Type() == TypeMsg::printinfo)
                     {
+#ifdef __WIN32__
                         console.PrintInfo(info); // вывод информации
+#else
+                        console->PrintInfo(info); // вывод информации
+#endif
                         it = l_msg_TX.erase(it);
                     }
                     else
@@ -450,7 +470,11 @@ public:
                         else if (-2 == code) // сокет закрыт
                         {
                             it = l_msg_TX.erase(it);
+#ifdef __WIN32__
                             console.PrintMsg(msg_t(TypeMsg::normal, "server not connected")); // диагностируем
+#else 
+                            console->PrintMsg(msg_t(TypeMsg::normal, "server not connected")); // диагностируем
+#endif
                         }
                     }
             }
@@ -478,18 +502,22 @@ public:
                 default:
                     break;
                 }
-
+                // вывод сообщения
+#ifdef __WIN32__
                 console.PrintMsg(msg_RX);
+#else
+                console->PrintMsg(msg_RX);
+#endif
                 msg_RX.Update().clear();
 
                 if (b_shut) // сервер отключился по нашей команде
                     socket->ResetConnected();
-
             }
 
             if (b_shut && b_echo || b_exit) // сервер отключился по команде другого клиента
                 socket->ResetConnected();
 
+            // обновление диагностики
             info.ConnectedServer(socket->GetConnected());
             info.ConnectedVisavi(u_counter > 0);
             b_exit |= !socket->GetConnected() && b_shut;
@@ -535,6 +563,7 @@ int main(int argc, char* argv[])
     else
         printf("Invalid parametr's. Please enter the number_port\n");
 
+    printf("client_shutdown\n");
     return EXIT_SUCCESS;
 }
 
@@ -552,7 +581,7 @@ bool parseParam(int argc, char* argv[], unsigned& r_port)
     if (argc == 2)
     {
         r_port = std::strtoul(argv[1], NULL, 10);
-        b_result = r_port != 0 && r_port != ULONG_MAX;
+        b_result = r_port != 0 && r_port != 0xFFFFFFFFUL;
     }
 
     return b_result;
