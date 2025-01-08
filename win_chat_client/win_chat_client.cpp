@@ -130,19 +130,19 @@ public:
         switch (Type())
         { // расшифровка сервесных сообщений
         case TypeMsg::shutDown:
-            buf = "server get command shutdown";
+            buf = "SYSTEM MSG: server get command shutdown";
             break;
         case TypeMsg::Exit:
-            buf = "server get command exit from visavi client";
+            buf = "SYSTEM MSG: server get command exit from visavi client";
             break;
         case TypeMsg::printinfo:
-            buf = "other visavi not connected";
+            buf = "SYSTEM MSG: other visavi not connected";
             break;
         case TypeMsg::linkOn:
-            buf = "server get connected from other visavi";
+            buf = "SYSTEM MSG: server get connected from other visavi";
             break;
         case TypeMsg::defaul:
-            buf = "server recived defined message";
+            buf = "SYSTEM MSG: server recived defined message";
             break;
         case TypeMsg::normal:
             buf.assign(text, 6, text.size() - 11); // выдаем текст без заголовка и конца сообщения
@@ -314,7 +314,7 @@ public:
     {
         Socket = 0; // дескриптор stdin
 #endif
-        std::cout << "command :\ninfo -- print info client connection\nshutdown -- close server\nexit -- close this client\n";
+        std::cout << "command :\nINFO -- print info client connection\nSHUTDOWN -- close server\nEXIT -- close this client\n";
     }
 
     /// <summary>
@@ -345,14 +345,14 @@ public:
 #endif
         if (result) // что то прочитали?
         {   // парсим команды
-            if (buf == "exit")
+            if (buf == "EXIT")
                 msgBuf.push_back(msg_t(TypeMsg::Exit));
-            else if (buf == "shutdown")
+            else if (buf == "SHUTDOWN")
                 msgBuf.push_back(msg_t(TypeMsg::shutDown));
-            else if (buf == "info")
+            else if (buf == "INFO")
                 msgBuf.push_back(msg_t(TypeMsg::printinfo));
             else
-                msgBuf.push_back(msg_t(TypeMsg::normal, buf));
+                msgBuf.push_back(msg_t(TypeMsg::normal, "VISAVI MSG: " + buf));
         }
 
         return result;
@@ -471,9 +471,9 @@ public:
                         {
                             it = l_msg_TX.erase(it);
 #ifdef __WIN32__
-                            console.PrintMsg(msg_t(TypeMsg::normal, "server not connected")); // диагностируем
+                            console.PrintMsg(msg_t(TypeMsg::normal, "SYSTEM MSG: server not connected")); // диагностируем
 #else 
-                            console->PrintMsg(msg_t(TypeMsg::normal, "server not connected")); // диагностируем
+                            console->PrintMsg(msg_t(TypeMsg::normal, "SYSTEM MSG: server not connected")); // диагностируем
 #endif
                         }
                     }
